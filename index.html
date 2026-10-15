@@ -6,7 +6,7 @@
     <meta charset="utf-8" />
     <meta content="width=device-width,initial-scale=1,viewport-fit=cover" name="viewport" />
     <meta content="#153b60" name="theme-color" />
-    <title>테마점검 통합 관리 rev.4-9</title>
+    <title>테마점검 통합 관리 rev.4-10</title>
     <style>
         :root {
             --n: #153b60;
@@ -1253,7 +1253,7 @@
 <body>
     <div class="app">
         <header class="top"><button class="back" id="back">←</button>
-            <h1>테마점검 통합 관리 rev.4-9</h1>
+            <h1>테마점검 통합 관리 rev.4-10</h1>
             <div class="top-tools"><button class="top-guide" id="guideOpen" type="button">사용법</button>
                 <div aria-live="polite" class="server-mini" id="serverStatus"><span class="server-dot"></span><span class="server-label">확인중</span></div>
             </div>
@@ -1372,6 +1372,12 @@
                 <h2>체크리스트 관리</h2>
                 <div class="manage-head"><button class="btn light" id="backupChecklist">현재 목록 백업</button><button class="btn light" id="refreshChecklist">새로고침</button></div>
                 <div class="manage-state"><button class="btn primary" data-edit-state="active">사용 중</button><button class="btn light" data-edit-state="inactive">사용 중지</button></div>
+                <div class="panel" id="masterCreatePanel">
+                    <b>테마·점검항목 추가</b>
+                    <div class="field"><label>새 테마</label><input id="newThemeName" maxlength="50" placeholder="예: 근로자"><button class="btn primary wide" id="addTheme" type="button">＋ 테마 추가</button></div>
+                    <div class="field"><label>새 점검항목</label><input id="newItemName" maxlength="50" placeholder="예: 유도자"><button class="btn primary wide" id="addItem" type="button">＋ 선택 테마에 점검항목 추가</button></div>
+                    <p class="hint">점검항목은 아래에서 선택한 테마에 추가됩니다.</p>
+                </div>
                 <div class="field"><label>테마</label><select id="editTheme"></select></div>
                 <div class="field"><label>점검항목</label><select id="editItem"></select></div>
                 <div class="panel" id="editRows"></div><button class="btn primary wide" id="addCheck">＋ 점검내용 추가</button>
@@ -2402,6 +2408,32 @@
             });
             $('#backupChecklist').onclick = downloadChecklist;
             $('#refreshChecklist').onclick = loadChecklistAdmin;
+            $('#addTheme').onclick = async () => {
+                let input = $('#newThemeName'), name = input.value.trim();
+                if (!name) return alert('추가할 테마명을 입력해 주세요.');
+                try {
+                    await admin('create-theme', { name });
+                    input.value = '';
+                    await loadMaster();
+                    await loadChecklistAdmin();
+                    alert('테마가 추가되었습니다.');
+                } catch (e) { alert(e.message) }
+            };
+            $('#addItem').onclick = async () => {
+                let input = $('#newItemName'), name = input.value.trim(), themeId = $('#editTheme').value;
+                if (!themeId) return alert('점검항목을 추가할 테마를 선택해 주세요.');
+                if (!name) return alert('추가할 점검항목명을 입력해 주세요.');
+                try {
+                    let j = await admin('create-item', { theme_id: themeId, name });
+                    input.value = '';
+                    await loadMaster();
+                    await loadChecklistAdmin();
+                    $('#editTheme').value = themeId;
+                    fillEditItems();
+                    if (j.data?.id) { $('#editItem').value = j.data.id; renderEditRows() }
+                    alert('점검항목이 추가되었습니다.');
+                } catch (e) { alert(e.message) }
+            };
             $('#addCheck').onclick = async () => {
                 let text = prompt('추가할 점검내용');
                 if (text && $('#editItem').value) {
