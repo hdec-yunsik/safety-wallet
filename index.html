@@ -6,7 +6,7 @@
     <meta charset="utf-8" />
     <meta content="width=device-width,initial-scale=1,viewport-fit=cover" name="viewport" />
     <meta content="#153b60" name="theme-color" />
-    <title>테마점검 통합 관리 rev.4-11</title>
+    <title>테마점검 통합 관리 rev.4-12</title>
     <style>
         :root {
             --n: #153b60;
@@ -1207,6 +1207,10 @@
             overflow-x: hidden
         }
 
+        .result-download-wrap { margin: 12px 0; display: grid; gap: 6px }
+        .result-download-note { margin: 0; font-size: 12px; color: var(--mut); text-align: center }
+        .result-download-btn:disabled { opacity: .55; cursor: not-allowed }
+
         .result-summary-table {
             width: 100%;
             min-width: 0;
@@ -1267,7 +1271,7 @@
 <body>
     <div class="app">
         <header class="top"><button class="back" id="back">←</button>
-            <h1>테마점검 통합 관리 rev.4-11</h1>
+            <h1>테마점검 통합 관리 rev.4-12</h1>
             <div class="top-tools"><button class="top-guide" id="guideOpen" type="button">사용법</button>
                 <div aria-live="polite" class="server-mini" id="serverStatus"><span class="server-dot"></span><span class="server-label">확인중</span></div>
             </div>
@@ -1331,6 +1335,10 @@
                         </thead>
                         <tbody id="resultBody"></tbody>
                     </table>
+                </div>
+                <div class="result-download-wrap">
+                    <button class="btn success wide result-download-btn" id="downloadResultImages" type="button" disabled>현황 이미지 다운로드</button>
+                    <p class="result-download-note" id="downloadResultNote">표에서 원하는 적합·부적합·계 건수를 선택해 주세요.</p>
                 </div>
                 <div id="detailList" style="margin-top:14px"></div>
             </section>
@@ -1516,7 +1524,9 @@
                 personalName = sessionStorage.getItem('personalName') || '',
                 personalGroup = 'company',
                 actionTarget = null,
-                actionPhotoFile = null;
+                actionPhotoFile = null,
+                resultDownloadRows = [],
+                resultDownloadTitle = '';
             async function rest(path, opt = {}) {
                 let r = await fetch(SUPABASE_URL + '/rest/v1/' + path, {
                     ...opt,
@@ -2043,6 +2053,149 @@
                 document.body.classList.remove('photo-viewer-open');
                 $('#photoViewerImage').removeAttribute('src');
             }
+            function safeFileName(v) {
+                return String(v || '점검결과').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, '_').slice(0, 60)
+            }
+            function wrapCanvasText(ctx, text, maxWidth) {
+                let lines = [], paragraphs = String(text || '').split(/\n/);
+                paragraphs.forEach(paragraph => {
+                    if (!paragraph) return lines.push('');
+                    let line = '';
+                    [...paragraph].forEach(ch => {
+                        let test = line + ch;
+                        if (line && ctx.measureText(test).width > maxWidth) {
+                            lines.push(line);
+                            line = ch;
+                        } else line = test;
+                    });
+                    lines.push(line)
+                });
+                return lines.length ? lines : ['']
+            }
+            async function loadExportImage(url) {
+                let r = await fetch(url, { cache: 'no-store' });
+                if (!r.ok) throw new Error('사진을 불러오지 못했습니다.');
+                return await createImageBitmap(await r.blob())
+            }
+            function drawCover(ctx, image, x, y, w, h) {
+                let scale = Math.min(w / image.width, h / image.height),
+                    dw = image.width * scale, dh = image.height * scale;
+                ctx.fillStyle = '#eef2f5';
+                ctx.fillRect(x, y, w, h);
+                ctx.drawImage(image, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh)
+            }
+            async function inspectionPng(row) {
+                const width = 720, pad = 8, gap = 8, photoH = 210,
+                    photos = (row.photo_urls?.length ? row.photo_urls : (row.photo_url ? [row.photo_url] : [])).filter(Boolean),
+                    photoRows = Math.ceil(Math.max(1, photos.length) / 2),
+                    photoBlockH = photos.length ? photoRows * photoH + (photoRows - 1) * gap + pad * 2 : 0,
+                    fields = [
+                        ['일자', row.inspection_date || ''],
+                        ['결과', row.overall_result || ''],
+                        ['점검항목', row.inspection_items?.item_name || ''],
+                        ['협력사', row.companies?.company_name || ''],
+                        ['위치', row.location_text || ''],
+                        ['내용', row.note || '']
+                    ];
+                let measure = document.createElement('canvas').getContext('2d');
+                measure.font = '15px "Noto Sans KR", "Malgun Gothic", sans-serif';
+                let rowHeights = fields.map(([, value]) => Math.max(42, wrapCanvasText(measure, value, 600).length * 23 + 18)),
+                    height = photoBlockH + rowHeights.reduce((a, b) => a + b, 0) + 2,
+                    canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                let ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, width, height);
+                let y = pad;
+                if (photos.length) {
+                    let bitmaps = await Promise.all(photos.map(loadExportImage));
+                    bitmaps.forEach((img, i) => {
+                        let col = i % 2, r = Math.floor(i / 2), cellW = (width - pad * 2 - gap) / 2;
+                        drawCover(ctx, img, pad + col * (cellW + gap), y + r * (photoH + gap), cellW, photoH);
+                        img.close?.()
+                    });
+                    y = photoBlockH
+                }
+                ctx.strokeStyle = '#d8e0e8';
+                ctx.lineWidth = 1;
+                fields.forEach(([label, value], i) => {
+                    let h = rowHeights[i], labelW = 82;
+                    ctx.fillStyle = '#f1f5f8';
+                    ctx.fillRect(0, y, labelW, h);
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(labelW, y, width - labelW, h);
+                    ctx.strokeRect(0.5, y + 0.5, width - 1, h);
+                    ctx.beginPath(); ctx.moveTo(labelW + .5, y); ctx.lineTo(labelW + .5, y + h); ctx.stroke();
+                    ctx.fillStyle = '#162536';
+                    ctx.font = '700 16px "Noto Sans KR", "Malgun Gothic", sans-serif';
+                    ctx.textBaseline = 'top';
+                    ctx.fillText(label, 8, y + 11);
+                    ctx.font = '15px "Noto Sans KR", "Malgun Gothic", sans-serif';
+                    wrapCanvasText(ctx, value, width - labelW - 20).forEach((line, n) => ctx.fillText(line, labelW + 10, y + 10 + n * 23));
+                    y += h
+                });
+                return await new Promise((ok, fail) => canvas.toBlob(b => b ? ok(b) : fail(new Error('이미지 생성 실패')), 'image/png'))
+            }
+            function crc32(bytes) {
+                let c = -1;
+                for (let i = 0; i < bytes.length; i++) {
+                    c ^= bytes[i];
+                    for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xEDB88320 & -(c & 1))
+                }
+                return (c ^ -1) >>> 0
+            }
+            function u16(v) { return new Uint8Array([v & 255, (v >>> 8) & 255]) }
+            function u32(v) { return new Uint8Array([v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255]) }
+            function concatBytes(parts) {
+                let size = parts.reduce((n, p) => n + p.length, 0), out = new Uint8Array(size), at = 0;
+                parts.forEach(p => { out.set(p, at); at += p.length });
+                return out
+            }
+            async function makeZip(files) {
+                let local = [], central = [], offset = 0, enc = new TextEncoder();
+                for (const file of files) {
+                    let name = enc.encode(file.name), data = new Uint8Array(await file.blob.arrayBuffer()), crc = crc32(data),
+                        head = concatBytes([u32(0x04034b50),u16(20),u16(0x0800),u16(0),u16(0),u16(0),u32(crc),u32(data.length),u32(data.length),u16(name.length),u16(0),name]);
+                    local.push(head, data);
+                    central.push(concatBytes([u32(0x02014b50),u16(20),u16(20),u16(0x0800),u16(0),u16(0),u16(0),u32(crc),u32(data.length),u32(data.length),u16(name.length),u16(0),u16(0),u16(0),u16(0),u32(0),u32(offset),name]));
+                    offset += head.length + data.length
+                }
+                let centralData = concatBytes(central), end = concatBytes([u32(0x06054b50),u16(0),u16(0),u16(files.length),u16(files.length),u32(centralData.length),u32(offset),u16(0)]);
+                return new Blob([...local, centralData, end], { type: 'application/zip' })
+            }
+            function setResultDownload(rows, title) {
+                resultDownloadRows = rows;
+                resultDownloadTitle = title;
+                $('#downloadResultImages').disabled = !rows.length;
+                $('#downloadResultImages').textContent = rows.length ? `현황 이미지 다운로드 (${rows.length}건)` : '현황 이미지 다운로드';
+                $('#downloadResultNote').textContent = rows.length ? `${title} 기준으로 점검 건별 PNG 이미지를 ZIP 파일로 저장합니다.` : '선택한 조건에 해당하는 점검기록이 없습니다.'
+            }
+            async function downloadResultImages() {
+                if (!resultDownloadRows.length) return alert('표에서 다운로드할 건수를 먼저 선택해 주세요.');
+                let b = $('#downloadResultImages'), old = b.textContent;
+                b.disabled = true;
+                try {
+                    let files = [];
+                    for (let i = 0; i < resultDownloadRows.length; i++) {
+                        b.textContent = `이미지 생성 중 ${i + 1} / ${resultDownloadRows.length}`;
+                        let row = resultDownloadRows[i], blob = await inspectionPng(row),
+                            item = safeFileName(row.inspection_items?.item_name || '점검항목'), company = safeFileName(row.companies?.company_name || '협력사');
+                        files.push({ name: `${String(i + 1).padStart(3, '0')}_${row.inspection_date || '일자없음'}_${item}_${company}.png`, blob })
+                    }
+                    b.textContent = 'ZIP 파일 만드는 중...';
+                    let zip = await makeZip(files), a = document.createElement('a'), url = URL.createObjectURL(zip);
+                    a.href = url;
+                    a.download = `safety-wallet-${safeFileName(resultDownloadTitle)}-${today()}.zip`;
+                    document.body.appendChild(a); a.click(); a.remove();
+                    setTimeout(() => URL.revokeObjectURL(url), 1000)
+                } catch (e) {
+                    alert('현황 다운로드 실패: ' + e.message)
+                } finally {
+                    b.disabled = false;
+                    b.textContent = old
+                }
+            }
             function showActionDetails(rows, personal, target) {
                 rows.forEach(r => photoGalleries.set(String(r.id), (r.photo_urls?.length ? r.photo_urls : (r.photo_url ? [r.photo_url] : [])).filter(Boolean)));
                 target.innerHTML = rows.map(r => `<article class="detail">${(r.photo_urls?.length?r.photo_urls:(r.photo_url?[r.photo_url]:[])).length?`<div class="result-photo-grid">${(r.photo_urls?.length?r.photo_urls:[r.photo_url]).map((u,i)=>`<img src="${u}" alt="점검 사진 ${i+1}" data-photo-gallery="${r.id}" data-photo-index="${i}" tabindex="0" role="button" aria-label="점검 사진 ${i+1} 확대 보기">`).join('')}</div>`:''}<div class="dg"><b>일자</b><span>${r.inspection_date||''}</span><b>결과</b><span>${r.overall_result||''}</span><b>점검항목</b><span>${esc(r.inspection_items?.item_name||'')}</span><b>협력사</b><span>${esc(r.companies?.company_name||'')}</span><b>위치</b><span>${esc(r.location_text||'')}</span><b>내용</b><span>${esc(r.note||'')}</span></div>${personal?`<button type="button" class="btn danger delete-inspection" data-delete-inspection="${r.id}">점검기록 삭제</button><p class="delete-note">삭제 시 점검결과, 답변, 사진이 모두 삭제됩니다.</p>`:''}</article>`).join('') || '<div class="empty">기록 없음</div>';
@@ -2194,6 +2347,12 @@
                         to: $('#to').value
                     });
                     adminRows = j.data || [];
+                    resultDownloadRows = [];
+                    resultDownloadTitle = '';
+                    $('#downloadResultImages').disabled = true;
+                    $('#downloadResultImages').textContent = '현황 이미지 다운로드';
+                    $('#downloadResultNote').textContent = '표에서 원하는 적합·부적합·계 건수를 선택해 주세요.';
+                    $('#detailList').innerHTML = '';
                     renderResults()
                 } catch (e) {
                     alert(e.message)
@@ -2212,8 +2371,13 @@
                     })).sort((x, y) => actionStats(y.a).b - actionStats(x.a).b);
                 $('#resultBody').innerHTML = actionRow('', adminRows, 'totalrow') + rs.map(x => actionRow(x.v, x.a)).join('');
                 $$('[data-ad]').forEach(x => x.onclick = () => {
-                    let [v, st] = x.dataset.ad.split('|');
-                    showActionDetails(filterActionRows(adminRows, decodeURIComponent(v), st, label), false, $('#detailList'))
+                    let [v, st] = x.dataset.ad.split('|'), key = decodeURIComponent(v),
+                        rows = filterActionRows(adminRows, key, st, label),
+                        statusText = st === 'good' ? '적합' : st === 'bad' ? '부적합' : '전체',
+                        groupText = group === 'inspector' ? '점검자별' : group === 'company' ? '협력사별' : '점검항목별',
+                        title = `${groupText}_${key || '계'}_${statusText}`;
+                    showActionDetails(rows, false, $('#detailList'));
+                    setResultDownload(rows, title)
                 })
             }
 
@@ -2424,6 +2588,7 @@
                 $$('[data-group]').forEach(b => b.className = 'btn ' + (b.dataset.group === group ? 'primary' : 'light'));
                 renderResults()
             });
+            $('#downloadResultImages').onclick = downloadResultImages;
             $('#tabIns').onclick = () => {
                 regType = 'inspector';
                 renderRegistry()
