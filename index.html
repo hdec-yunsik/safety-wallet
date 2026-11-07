@@ -6,7 +6,7 @@
     <meta charset="utf-8" />
     <meta content="width=device-width,initial-scale=1,viewport-fit=cover" name="viewport" />
     <meta content="#153b60" name="theme-color" />
-    <title>테마점검 통합 관리 rev.4-14</title>
+    <title>테마점검 통합 관리 rev.4-15</title>
     <style>
         :root {
             --n: #153b60;
@@ -1246,6 +1246,56 @@
             font-size: 14px
         }
 
+        .acc-toggle {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            width: 100%;
+            border: 0;
+            background: none;
+            padding: 5px 0;
+            font: inherit;
+            font-weight: 900;
+            color: var(--n);
+            text-align: left;
+            cursor: pointer
+        }
+
+        .acc-toggle .acc-arrow {
+            flex: none;
+            font-size: 10px;
+            color: var(--b);
+            transition: transform .15s
+        }
+
+        .acc-toggle[aria-expanded="true"] .acc-arrow {
+            transform: rotate(90deg)
+        }
+
+        .acc-company td:first-child {
+            padding-left: 4px
+        }
+
+        .acc-item {
+            display: none;
+            background: #f3f8fc
+        }
+
+        .acc-item.open {
+            display: table-row
+        }
+
+        .result-summary-table .acc-item td:first-child {
+            padding-left: 22px;
+            font-size: 12px;
+            font-weight: 700;
+            color: #33475b
+        }
+
+        .result-summary-table .acc-item .link {
+            font-size: 13px
+        }
+
         @media(max-width:390px) {
 
             .result-summary-table th,
@@ -1271,7 +1321,7 @@
 <body>
     <div class="app">
         <header class="top"><button class="back" id="back">←</button>
-            <h1>테마점검 통합 관리 rev.4-14</h1>
+            <h1>테마점검 통합 관리 rev.4-15</h1>
             <div class="top-tools"><button class="top-guide" id="guideOpen" type="button">사용법</button>
                 <div aria-live="polite" class="server-mini" id="serverStatus"><span class="server-dot"></span><span class="server-label">확인중</span></div>
             </div>
@@ -1527,6 +1577,7 @@
                 actionPhotoFile = null,
                 resultDownloadRows = [],
                 resultDownloadTitle = '',
+                openCompanies = new Set(),
                 verifiedInspectorId = '',
                 continueVerifiedId = '';
             async function rest(path, opt = {}) {
@@ -2378,7 +2429,21 @@
                         v,
                         a: adminRows.filter(x => label(x) === v)
                     })).sort((x, y) => actionStats(y.a).b - actionStats(x.a).b);
-                $('#resultBody').innerHTML = actionRow('', adminRows, 'totalrow') + rs.map(x => actionRow(x.v, x.a)).join('');
+                $('#resultBody').innerHTML = actionRow('', adminRows, 'totalrow') + rs.map(x => group === 'company' ? companyAccordion(x.v, x.a) : actionRow(x.v, x.a)).join('');
+                $$('[data-acc]').forEach(b => b.onclick = () => {
+                    let k = b.dataset.acc,
+                        open = b.getAttribute('aria-expanded') !== 'true';
+                    b.setAttribute('aria-expanded', open);
+                    open ? openCompanies.add(k) : openCompanies.delete(k);
+                    $$('[data-acc-item]').filter(r => r.dataset.accItem === k).forEach(r => r.classList.toggle('open', open))
+                });
+                $$('[data-adc]').forEach(x => x.onclick = () => {
+                    let [c, i, st] = x.dataset.adc.split('|').map(decodeURIComponent),
+                        rows = filterActionRows(adminRows.filter(r => (r.companies?.company_name || '') === c && (r.inspection_items?.item_name || '미분류') === i), '', st, label),
+                        statusText = st === 'good' ? '적합' : st === 'bad' ? '부적합' : '전체';
+                    showActionDetails(rows, false, $('#detailList'));
+                    setResultDownload(rows, `협력사별_${c}_${i}_${statusText}`)
+                });
                 $$('[data-ad]').forEach(x => x.onclick = () => {
                     let [v, st] = x.dataset.ad.split('|'), key = decodeURIComponent(v),
                         rows = filterActionRows(adminRows, key, st, label),
@@ -2388,6 +2453,23 @@
                     showActionDetails(rows, false, $('#detailList'));
                     setResultDownload(rows, title)
                 })
+            }
+
+            function companyAccordion(name, rows) {
+                let k = encodeURIComponent(name),
+                    open = openCompanies.has(k),
+                    itemNames = [...new Set(rows.map(r => r.inspection_items?.item_name || '미분류'))],
+                    its = itemNames.map(n => ({
+                        n,
+                        a: rows.filter(r => (r.inspection_items?.item_name || '미분류') === n)
+                    })).sort((p, q) => actionStats(q.a).b - actionStats(p.a).b || actionStats(q.a).t - actionStats(p.a).t),
+                    head = actionRow(name, rows, 'acc-company').replace(`<td>${esc(name)}</td>`, `<td><button type="button" class="acc-toggle" data-acc="${k}" aria-expanded="${open}"><span class="acc-arrow">▶</span><span>${esc(name)}</span></button></td>`),
+                    sub = its.map(x => {
+                        let st = actionStats(x.a),
+                            e = encodeURIComponent(x.n);
+                        return `<tr class="acc-item ${open?'open':''}" data-acc-item="${k}"><td>${esc(x.n)}</td><td><button class="link" data-adc="${k}|${e}|good">${st.g}</button></td><td><button class="link" data-adc="${k}|${e}|bad">${st.b}</button></td><td><button class="link" data-adc="${k}|${e}|all">${st.t}</button></td></tr>`
+                    }).join('');
+                return head + sub
             }
 
             function showDetails(v, res) {
