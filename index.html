@@ -6,7 +6,7 @@
     <meta charset="utf-8" />
     <meta content="width=device-width,initial-scale=1,viewport-fit=cover" name="viewport" />
     <meta content="#153b60" name="theme-color" />
-    <title>테마점검 통합 관리 rev.4-12</title>
+    <title>테마점검 통합 관리 rev.4-14</title>
     <style>
         :root {
             --n: #153b60;
@@ -1271,7 +1271,7 @@
 <body>
     <div class="app">
         <header class="top"><button class="back" id="back">←</button>
-            <h1>테마점검 통합 관리 rev.4-12</h1>
+            <h1>테마점검 통합 관리 rev.4-14</h1>
             <div class="top-tools"><button class="top-guide" id="guideOpen" type="button">사용법</button>
                 <div aria-live="polite" class="server-mini" id="serverStatus"><span class="server-dot"></span><span class="server-label">확인중</span></div>
             </div>
@@ -1526,7 +1526,9 @@
                 actionTarget = null,
                 actionPhotoFile = null,
                 resultDownloadRows = [],
-                resultDownloadTitle = '';
+                resultDownloadTitle = '',
+                verifiedInspectorId = '',
+                continueVerifiedId = '';
             async function rest(path, opt = {}) {
                 let r = await fetch(SUPABASE_URL + '/rest/v1/' + path, {
                     ...opt,
@@ -1789,6 +1791,12 @@
                 if (!photoFiles.length) return alert('사진을 1장 이상 선택해 주세요.');
                 let inspector = $('#inspector');
                 if (!inspector.value) return alert('점검자를 선택해 주세요.');
+                if (continueVerifiedId && inspector.value === continueVerifiedId) {
+                    await persistInspection({
+                        preventDefault() {}
+                    });
+                    return
+                }
                 $('#saveAuthName').textContent = inspector.options[inspector.selectedIndex]?.text || '선택한 점검자';
                 $('#saveAuthCode').value = '';
                 $('#saveAuthError').textContent = '';
@@ -1823,6 +1831,7 @@
                         }),
                         j = await r.json();
                     if (!r.ok || !j.success) throw new Error(j.message || '본인 확인에 실패했습니다.');
+                    verifiedInspectorId = inspector_id;
                     $('#saveAuthModal').classList.remove('on');
                     $('#saveAuthCode').value = '';
                     await persistInspection({
@@ -2514,6 +2523,7 @@
             $('#back').onclick = () => history.length > 1 ? history.back() : show('home', false);
             $$('[data-nav]').forEach(b => b.onclick = () => show(b.dataset.nav));
             $('#inspectOpen').onclick = () => {
+                verifiedInspectorId = continueVerifiedId = '';
                 resetInspectionForm();
                 show('inspect')
             };
@@ -2663,11 +2673,19 @@
                 }
             };
             $('#continueInspect').onclick = () => {
+                continueVerifiedId = verifiedInspectorId || continueVerifiedId;
                 $('#finishModal').classList.remove('on');
                 resetInspectionForm();
+                let keepInspector = inspectors.find(x => x.id === continueVerifiedId);
+                if (keepInspector) {
+                    $('#inspector').value = keepInspector.id;
+                    $('#inspectorPick').innerHTML = `${esc(keepInspector.display_name)} <span>▼</span>`;
+                    $('#inspectorPick').classList.remove('empty-value')
+                }
                 show('inspect', false)
             };
             $('#stopInspect').onclick = () => {
+                verifiedInspectorId = continueVerifiedId = '';
                 $('#finishModal').classList.remove('on');
                 resetInspectionForm();
                 show('home')
